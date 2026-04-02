@@ -312,14 +312,16 @@ function LoginScreen({app,setApp,onLogin,onSignup}){
   const[stayLogin,setStayLogin]=useState(()=>!!localStorage.getItem("stay_login"));
 
   const doLogin=()=>{
-    // 최신 저장 데이터에서 사용자 찾기 (로그아웃 후 재로그인 시 최신 정보 보장)
+    // localStorage → app.users → INIT 순서로 사용자 찾기
     const freshApp=ld()||{users:app.users};
-    const u=(freshApp.users||app.users).find(u=>u.id===id&&u.pw===pw);
+    const allUsers=[
+      ...(freshApp.users||[]),
+      ...INIT.users.filter(iu=>!(freshApp.users||[]).some(u=>u.id===iu.id))
+    ];
+    const u=allUsers.find(u=>u.id===id&&u.pw===pw);
     if(u){
-      // 아이디 기억
       if(remId) localStorage.setItem("saved_id",id);
       else localStorage.removeItem("saved_id");
-      // 로그인 상태 유지
       if(stayLogin) localStorage.setItem("stay_login",id);
       else localStorage.removeItem("stay_login");
       setApp(p=>({...p,...freshApp,currentUser:u}));
