@@ -11,6 +11,7 @@
 <!-- Firebase SDK (compat 버전 — window.firebase로 접근 가능) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script>
 (function(){
   const firebaseConfig={
@@ -23,6 +24,38 @@
   };
   firebase.initializeApp(firebaseConfig);
   const db=firebase.firestore();
+  const storage=firebase.storage();
+
+  /* ── Storage: base64 → URL 변환 업로드 ── */
+  window.fbUploadPhoto=async(base64,path)=>{
+    try{
+      const ref=storage.ref(path);
+      await ref.putString(base64,'data_url');
+      const url=await ref.getDownloadURL();
+      return url;
+    }catch(e){console.error("fbUploadPhoto",e);return null;}
+  };
+
+  /* ── Storage: 사진 삭제 ── */
+  window.fbDeletePhoto=async(url)=>{
+    try{
+      const ref=storage.refFromURL(url);
+      await ref.delete();
+      return true;
+    }catch(e){console.error("fbDeletePhoto",e);return false;}
+  };
+
+  /* ── Storage: base64 배열 → URL 배열 변환 ── */
+  window.fbUploadPhotos=async(photos,folder)=>{
+    if(!photos||photos.length===0) return [];
+    const urls=await Promise.all(photos.map(async(p,i)=>{
+      // 이미 URL이면 그대로 반환
+      if(p.startsWith('http')) return p;
+      const path=`${folder}/${Date.now()}_${i}.jpg`;
+      return await window.fbUploadPhoto(p,path);
+    }));
+    return urls.filter(Boolean);
+  };
 
   /* ── users ── */
   window.fbLoadUsers=async()=>{
@@ -2017,8 +2050,23 @@ function DisinfectionTab({userId}){
     setForm(p=>{const next={...p,hotPhotos:(p.hotPhotos||[]).filter((_,i)=>i!==idx)};saveNow(next);return next;});
     setSaved(false);
   };
-  const doSave=()=>{
-    try{const d=JSON.parse(localStorage.getItem(SK_DIS)||"{}");d[userId]=form;localStorage.setItem(SK_DIS,JSON.stringify(d));}catch{}
+  const[uploading,setUploading]=useState(false);
+  const doSave=async()=>{
+    try{
+      setUploading(true);
+      let saved=form;
+      if(window.fbUploadPhotos){
+        const photos=await window.fbUploadPhotos(form.photos||[],`disseed/${userId}/photos`);
+        const hotPhotos=await window.fbUploadPhotos(form.hotPhotos||[],`disseed/${userId}/hotphotos`);
+        saved={...form,photos,hotPhotos};
+        setForm(saved);
+      }
+      const d=JSON.parse(localStorage.getItem(SK_DIS)||"{}");
+      d[userId]=saved;
+      localStorage.setItem(SK_DIS,JSON.stringify(d));
+      if(window.fbSaveDisSeed) window.fbSaveDisSeed(userId,saved);
+    }catch(e){console.error(e);}
+    setUploading(false);
     setSaved(true);setTimeout(()=>setSaved(false),2000);
   };
   return(
@@ -2258,9 +2306,9 @@ function SeedlingTab({userId,onReset}){
         </div>
       </div>
       <div style={{display:"flex",gap:10}}>
-        <button onClick={doSave}
-          style={{flex:2,background:"#16a34a",color:"white",border:"none",borderRadius:12,padding:"14px",fontSize:15,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 12px rgba(22,163,74,.3)"}}>
-          {saved?"✅ 저장됨":"💾 저장"}
+        <button onClick={doSave} disabled={uploading}
+          style={{flex:2,background:"#16a34a",color:"white",border:"none",borderRadius:12,padding:"14px",fontSize:15,fontWeight:700,cursor:uploading?"not-allowed":"pointer",boxShadow:"0 4px 12px rgba(22,163,74,.3)",opacity:uploading?0.7:1}}>
+          {uploading?"⏳ 업로드 중...":saved?"✅ 저장됨":"💾 저장"}
         </button>
         <button onClick={doReset}
           style={{flex:1,background:"white",color:"#6b7280",border:"1.5px solid #d1d5db",borderRadius:12,padding:"14px",fontSize:14,fontWeight:700,cursor:"pointer"}}>
@@ -2437,24 +2485,34 @@ function DisasterForm({app,onBack,editItem,onSave,year}){
   const resetForm=(i)=>{if(!confirm("이 항목을 초기화하시겠습니까?"))return;setForms(p=>{const n=[...p];n[i]={...blank};return n;});setSaved(false);};
   const removeForm=(i)=>setForms(p=>p.filter((_,idx)=>idx!==i));
   const addForm=()=>{if(forms.length>=maxForms)return;const nextEv=myExtras[forms.length]||{};setForms(p=>[...p,{...blank,variety:nextEv.variety||"",area:nextEv.area||"",farmCount:nextEv.farmCount||""}]);};
-  const doSave=()=>{
+  const[uploading,setUploading]=useState(false);
+  const doSave=async()=>{
     try{
+      setUploading(true);
       const storageKey=`${u?.id||"unknown"}_${selYear}`;
       const db=JSON.parse(localStorage.getItem(SK)||"{}");
       let list=Array.isArray(db[storageKey])?db[storageKey]:db[storageKey]?[db[storageKey]]:[];
       const now=new Date().toISOString();
+      // 사진을 Storage에 업로드하고 URL로 교체
+      const processedForms=await Promise.all(forms.map(async(f)=>{
+        const photos=window.fbUploadPhotos
+          ?await window.fbUploadPhotos(f.photos||[],`disasters/${u?.id||"unknown"}`)
+          :(f.photos||[]);
+        return{...f,photos};
+      }));
       if(editItem?._id){
         const idx=list.findIndex(r=>r._id===editItem._id);
-        const f=forms[0];
+        const f=processedForms[0];
         if(idx>=0)list[idx]={...f,_id:editItem._id,savedAt:now};
         else list.push({...f,_id:editItem._id,savedAt:now});
       }else{
-        forms.forEach((f,i)=>{list.unshift({...f,_id:`${Date.now()}_${i}`,savedAt:now});});
+        processedForms.forEach((f,i)=>{list.unshift({...f,_id:`${Date.now()}_${i}`,savedAt:now});});
       }
       db[storageKey]=list;
       localStorage.setItem(SK,JSON.stringify(db));
       if(window.fbSaveDisaster) window.fbSaveDisaster(storageKey,list);
-    }catch{}
+    }catch(e){console.error(e);}
+    setUploading(false);
     setSaved(true);
     setTimeout(()=>{setSaved(false);onSave();},1000);
   };
@@ -2580,8 +2638,8 @@ function DisasterForm({app,onBack,editItem,onSave,year}){
           </div>
         </div>
         <div style={{display:"flex",gap:10}}>
-          <button onClick={doSave} style={{flex:2,background:"#dc2626",color:"white",border:"none",borderRadius:14,padding:"16px 0",fontSize:16,fontWeight:900,cursor:"pointer",boxShadow:"0 4px 12px rgba(220,38,38,.3)"}}>
-            {saved?"✅ 저장됨":"💾 저장"}
+          <button onClick={doSave} disabled={uploading} style={{flex:2,background:"#dc2626",color:"white",border:"none",borderRadius:14,padding:"16px 0",fontSize:16,fontWeight:900,cursor:uploading?"not-allowed":"pointer",boxShadow:"0 4px 12px rgba(220,38,38,.3)",opacity:uploading?0.7:1}}>
+            {uploading?"⏳ 업로드 중...":saved?"✅ 저장됨":"💾 저장"}
           </button>
           <button onClick={()=>resetForm(fi)} style={{flex:1,background:"white",color:"#dc2626",border:"1.5px solid #dc2626",borderRadius:14,padding:"16px 0",fontSize:14,fontWeight:900,cursor:"pointer"}}>
             초기화
