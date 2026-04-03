@@ -3604,14 +3604,20 @@ function App(){
       setApp(p=>{
         const stayId=localStorage.getItem("stay_login");
         const currentId=p.currentUser?.id||stayId;
-        // 서명은 로컬(별도 저장)에서 복원
-        const usersWithSig=(synced.users||[]).map(u=>({
+        // 기존 React state users를 기준으로, Firestore에만 있는 신규 유저만 추가
+        const existingUsers=p.users||[];
+        const newFsUsers=(synced.users||[]).filter(fu=>!existingUsers.some(u=>u.id===fu.id));
+        const mergedUsers=[...existingUsers,...newFsUsers].map(u=>({
           ...u,
           signature:loadSig(u.id)||u.signature||null
         }));
-        const allUsers=[...usersWithSig,...INIT.users.filter(iu=>!usersWithSig.some(u=>u.id===iu.id))];
-        const updatedUser=allUsers.find(u=>u.id===currentId)||p.currentUser;
-        return{...p,users:usersWithSig,records:synced.records||p.records,currentUser:updatedUser};
+        // currentUser는 현재 state 우선
+        const currentUser=p.currentUser
+          ? {...p.currentUser, signature:loadSig(p.currentUser.id)||p.currentUser.signature||null}
+          : mergedUsers.find(u=>u.id===currentId)||null;
+        // records: 기존 state 우선, Firebase에만 있는 것 추가
+        const mergedRecords={...(synced.records||{}),...(p.records||{})};
+        return{...p,users:mergedUsers,records:mergedRecords,currentUser};
       });
     };
     window.addEventListener("fbSynced",handler);
