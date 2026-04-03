@@ -3521,12 +3521,24 @@ function AdminScreen({app,setApp,adminSelRef}){
 
 /* ════════════════════ ROOT ════════════════════ */
 function App(){
-  const[app,setApp]=useState(()=>ld()||INIT);
+  const[app,setApp]=useState(()=>{
+    const saved=ld()||INIT;
+    // 새로고침 시 stay_login으로 currentUser 복원
+    const stayId=localStorage.getItem("stay_login");
+    if(stayId&&!saved.currentUser){
+      // INIT admin 계정도 포함해서 찾기
+      const allUsers=[...(saved.users||[]),...INIT.users.filter(iu=>!(saved.users||[]).some(u=>u.id===iu.id))];
+      const u=allUsers.find(u=>u.id===stayId);
+      if(u) return{...saved,currentUser:u};
+    }
+    return saved;
+  });
   const[screen,setScreen]=useState(()=>{
     const stayId=localStorage.getItem("stay_login");
     if(stayId){
       const saved=ld()||INIT;
-      const u=saved.users?.find(u=>u.id===stayId);
+      const allUsers=[...(saved.users||[]),...INIT.users.filter(iu=>!(saved.users||[]).some(u=>u.id===iu.id))];
+      const u=allUsers.find(u=>u.id===stayId);
       if(u) return "app";
     }
     return "login";
@@ -3536,24 +3548,17 @@ function App(){
   const[disasterOpen,setDisasterOpen]=useState(false);
   const[canGoBack,setCanGoBack]=useState(false);
 
-  // 로그인 상태 유지 시 currentUser 자동 설정
-  useState(()=>{
-    const stayId=localStorage.getItem("stay_login");
-    if(stayId){
-      const saved=ld()||INIT;
-      const u=saved.users?.find(u=>u.id===stayId);
-      if(u&&!saved.currentUser) setApp(p=>({...p,currentUser:u}));
-    }
-  });
-
   // Firebase 초기 동기화 완료 시 앱 상태 갱신
   useEffect(()=>{
     const handler=(e)=>{
       const synced=e.detail;
       if(!synced)return;
       setApp(p=>{
-        // currentUser도 최신 정보로 갱신
-        const updatedUser=synced.users?.find(u=>u.id===p.currentUser?.id)||p.currentUser;
+        // currentUser 복원: 현재 로그인된 유저 or stay_login 유저
+        const stayId=localStorage.getItem("stay_login");
+        const currentId=p.currentUser?.id||stayId;
+        const allUsers=[...(synced.users||[]),...INIT.users.filter(iu=>!(synced.users||[]).some(u=>u.id===iu.id))];
+        const updatedUser=allUsers.find(u=>u.id===currentId)||p.currentUser;
         return{...p,users:synced.users||p.users,records:synced.records||p.records,currentUser:updatedUser};
       });
     };
