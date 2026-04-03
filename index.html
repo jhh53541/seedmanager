@@ -274,14 +274,45 @@ const {useState,useRef,useEffect,useCallback}=React;
 
 /* ── storage ── */
 const SK="seedfarm_v8";
-const ld=()=>{try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch{return null;}};
+const SK_SIG="seedfarm_signatures"; // 서명 별도 저장
+
+// 서명을 별도 키에 저장/로드
+const saveSig=(userId,sig)=>{try{const d=JSON.parse(localStorage.getItem(SK_SIG)||"{}");d[userId]=sig;localStorage.setItem(SK_SIG,JSON.stringify(d));}catch(e){console.error("서명 저장 실패",e);}};
+const loadSig=(userId)=>{try{const d=JSON.parse(localStorage.getItem(SK_SIG)||"{}");return d[userId]||null;}catch{return null;}};
+
+// users에서 서명 제거 후 저장, 서명은 별도 저장
+const ld=()=>{
+  try{
+    const r=localStorage.getItem(SK);
+    const data=r?JSON.parse(r):null;
+    if(!data) return null;
+    // 서명 복원
+    if(data.users){
+      data.users=data.users.map(u=>({...u,signature:loadSig(u.id)||u.signature||null}));
+    }
+    if(data.currentUser){
+      data.currentUser={...data.currentUser,signature:loadSig(data.currentUser.id)||data.currentUser.signature||null};
+    }
+    return data;
+  }catch{return null;}
+};
+
 const sv=d=>{
-  try{localStorage.setItem(SK,JSON.stringify(d));}catch{}
-  // Firestore에 users 동기화 (비밀번호·서명 base64 제외)
+  try{
+    // 서명은 별도 저장, seedfarm_v8에는 서명 제외
+    const cleanUsers=(d.users||[]).map(u=>{
+      if(u.signature) saveSig(u.id, u.signature);
+      const{signature,...rest}=u;
+      return rest;
+    });
+    const cleanCurrentUser=d.currentUser?{...d.currentUser,signature:undefined}:d.currentUser;
+    if(d.currentUser?.signature) saveSig(d.currentUser.id, d.currentUser.signature);
+    localStorage.setItem(SK,JSON.stringify({...d,users:cleanUsers,currentUser:cleanCurrentUser}));
+  }catch(e){console.error("localStorage 저장 실패",e);}
+  // Firestore에 users 동기화 (비밀번호 제외, 서명은 Storage URL로)
   if(window.fbSaveUser&&d.users){
     d.users.forEach(async u=>{
       const{pw,...userWithoutPw}=u;
-      // 서명이 base64면 Storage에 업로드 후 URL로 교체
       if(userWithoutPw.signature&&userWithoutPw.signature.startsWith('data:')){
         if(window.fbUploadPhoto){
           const url=await window.fbUploadPhoto(userWithoutPw.signature,`signatures/${u.id}.png`);
@@ -3571,12 +3602,16 @@ function App(){
       const synced=e.detail;
       if(!synced)return;
       setApp(p=>{
-        // currentUser 복원: 현재 로그인된 유저 or stay_login 유저
         const stayId=localStorage.getItem("stay_login");
         const currentId=p.currentUser?.id||stayId;
-        const allUsers=[...(synced.users||[]),...INIT.users.filter(iu=>!(synced.users||[]).some(u=>u.id===iu.id))];
+        // 서명은 로컬(별도 저장)에서 복원
+        const usersWithSig=(synced.users||[]).map(u=>({
+          ...u,
+          signature:loadSig(u.id)||u.signature||null
+        }));
+        const allUsers=[...usersWithSig,...INIT.users.filter(iu=>!usersWithSig.some(u=>u.id===iu.id))];
         const updatedUser=allUsers.find(u=>u.id===currentId)||p.currentUser;
-        return{...p,users:synced.users||p.users,records:synced.records||p.records,currentUser:updatedUser};
+        return{...p,users:usersWithSig,records:synced.records||p.records,currentUser:updatedUser};
       });
     };
     window.addEventListener("fbSynced",handler);
