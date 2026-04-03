@@ -2049,6 +2049,22 @@ function DsFR({label,children,inline=false}){
   );
 }
 
+/* ── ErrorBoundary ── */
+class ErrorBoundary extends React.Component{
+  constructor(props){super(props);this.state={err:null};}
+  static getDerivedStateFromError(e){return{err:e};}
+  componentDidCatch(e,info){console.error("렌더 에러:",e,info);}
+  render(){
+    if(this.state.err)return(
+      <div style={{padding:16,background:"#fee2e2",borderRadius:12,margin:"8px 0",fontSize:13,color:"#b91c1c"}}>
+        ⚠️ 화면 오류: {this.state.err.message}
+        <button onClick={()=>this.setState({err:null})} style={{marginLeft:12,padding:"4px 10px",borderRadius:6,border:"none",background:"#dc2626",color:"white",cursor:"pointer",fontSize:12}}>다시 시도</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 /* 침종(소독) 탭 */
 function DisinfectionTab({userId}){
   const SK_DIS="seedfarm_dis_v1";
@@ -2506,9 +2522,9 @@ function DisSeedScreen({app,onBack}){
         </div>
 
         {/* 침종(소독) 카드 */}
-        <DisinfectionTab key={`dis_${tabKey}`} userId={tabKey}/>
+        <ErrorBoundary><DisinfectionTab key={`dis_${tabKey}`} userId={tabKey}/></ErrorBoundary>
         {/* 육묘 카드 */}
-        <SeedlingTab key={`seed_${tabKey}`} userId={tabKey} onReset={()=>setResetKey(k=>k+1)}/>
+        <ErrorBoundary><SeedlingTab key={`seed_${tabKey}`} userId={tabKey} onReset={()=>setResetKey(k=>k+1)}/></ErrorBoundary>
       </div>
     </div>
   );
