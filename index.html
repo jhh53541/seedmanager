@@ -1363,7 +1363,7 @@ function ActivityCell({value,onChange}){
     <div style={{position:"relative",width:"100%"}}>
       <button onClick={()=>setOpen(o=>!o)}
         style={{width:"100%",border:"2px solid #e5e7eb",borderRadius:8,padding:"4px 6px",fontSize:"0.72rem",textAlign:"left",background:"white",cursor:"pointer",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",minHeight:"1.8rem"}}>
-        {value||"선택..."}
+        {value||"선택"}
       </button>
       {open&&(
         <>
@@ -1632,7 +1632,7 @@ function MonthForm({month,year,app,setApp,onBack,selMonth,setSelMonth,selYear,se
                   ?<span style={{fontSize:"0.82rem",color:"#374151",padding:"3px 4px",display:"block",textAlign:"center"}}>{row.time||""}</span>
                   :<select value={row.time||""} onChange={e=>updRow(i,"time",e.target.value)}
                       style={{width:"100%",border:"1px solid #d1d5db",borderRadius:6,padding:"4px 2px",fontSize:"0.72rem",fontFamily:"inherit",background:"white",textAlign:"center"}}>
-                      <option value=""></option>
+                      <option value="">선택</option>
                       <option value="1시간">1시간</option>
                       <option value="2시간">2시간</option>
                       <option value="3시간">3시간</option>
