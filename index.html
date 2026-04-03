@@ -2370,9 +2370,9 @@ function SeedlingTab({userId,onReset}){
         </div>
       </div>
       <div style={{display:"flex",gap:10}}>
-        <button onClick={doSave} disabled={uploading}
-          style={{flex:2,background:"#16a34a",color:"white",border:"none",borderRadius:12,padding:"14px",fontSize:15,fontWeight:700,cursor:uploading?"not-allowed":"pointer",boxShadow:"0 4px 12px rgba(22,163,74,.3)",opacity:uploading?0.7:1}}>
-          {uploading?"⏳ 업로드 중...":saved?"✅ 저장됨":"💾 저장"}
+        <button onClick={doSave}
+          style={{flex:2,background:"#16a34a",color:"white",border:"none",borderRadius:12,padding:"14px",fontSize:15,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 12px rgba(22,163,74,.3)"}}>
+          {saved?"✅ 저장됨":"💾 저장"}
         </button>
         <button onClick={doReset}
           style={{flex:1,background:"white",color:"#6b7280",border:"1.5px solid #d1d5db",borderRadius:12,padding:"14px",fontSize:14,fontWeight:700,cursor:"pointer"}}>
