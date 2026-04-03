@@ -147,16 +147,21 @@
       const SK="seedfarm_v8";
       const local=JSON.parse(localStorage.getItem(SK)||"{}");
 
-      // users 동기화
+      // users 동기화 (admin 포함)
       const fsUsers=await window.fbLoadUsers();
       const localUsers=local.users||[];
       const merged=[...localUsers];
       if(fsUsers&&fsUsers.length>0){
         fsUsers.forEach(fu=>{
-          if(fu.id==="admin")return;
           const idx=merged.findIndex(u=>u.id===fu.id);
-          if(idx>=0)merged[idx]={...merged[idx],...fu};
-          else merged.push(fu);
+          if(idx>=0){
+            // 비밀번호는 로컬 값 유지 (Firestore에 저장 안 함)
+            const localPw=merged[idx].pw;
+            merged[idx]={...merged[idx],...fu,pw:localPw};
+          } else {
+            // 새 유저는 추가 (admin 제외 — admin은 로컬에 항상 있음)
+            if(fu.id!=="admin") merged.push(fu);
+          }
         });
       }
 
@@ -268,10 +273,11 @@ const SK="seedfarm_v8";
 const ld=()=>{try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch{return null;}};
 const sv=d=>{
   try{localStorage.setItem(SK,JSON.stringify(d));}catch{}
-  // Firestore에 users 동기화
+  // Firestore에 users 동기화 (admin 포함, 단 비밀번호 제외)
   if(window.fbSaveUser&&d.users){
     d.users.forEach(u=>{
-      if(u.id!=="admin") window.fbSaveUser(u);
+      const{pw,...userWithoutPw}=u;
+      window.fbSaveUser({...userWithoutPw,_hasPw:!!pw});
     });
   }
 };
