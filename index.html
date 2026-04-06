@@ -145,51 +145,53 @@
   window.fbInit=async()=>{
     try{
       const SK="seedfarm_v8";
+      // 항상 최신 로컬 데이터 기준으로 시작
       const local=JSON.parse(localStorage.getItem(SK)||"{}");
-
-      // users 동기화: 로컬에 없는 신규 유저만 Firestore에서 추가
-      const fsUsers=await window.fbLoadUsers();
       const localUsers=local.users||[];
-      const merged=[...localUsers];
+
+      // Firestore에서 로컬에 없는 신규 유저만 가져오기
+      const fsUsers=await window.fbLoadUsers();
+      const newUsers=[];
       if(fsUsers&&fsUsers.length>0){
         fsUsers.forEach(fu=>{
-          const idx=merged.findIndex(u=>u.id===fu.id);
-          if(idx>=0){
-            // 로컬 데이터 우선 유지, Firestore는 로컬에 없는 필드만 보완
-            // 단, 서명 URL(http)은 Firestore 값 사용 (base64 → URL 변환됐을 수 있으므로)
-            const localUser=merged[idx];
-            const sig=localUser.signature?.startsWith('http')
-              ? localUser.signature
-              : (fu.signature||localUser.signature);
-            merged[idx]={...fu,...localUser,signature:sig,pw:localUser.pw};
-          } else {
-            // 완전히 새로운 유저만 추가
-            if(fu.id!=="admin") merged.push(fu);
-          }
+          if(fu.id==="admin") return; // admin은 항상 로컬 우선
+          const exists=localUsers.some(u=>u.id===fu.id);
+          if(!exists) newUsers.push(fu); // 로컬에 없는 신규 유저만 추가
         });
       }
 
-      // records 동기화: Firestore에만 있는 records 추가 (로컬 우선)
+      // records: 로컬에 없는 것만 추가
       const fsRecords=await window.fbGetAllRecords();
       const localRecords=local.records||{};
-      const mergedRecords={...fsRecords,...localRecords}; // 로컬 우선
+      const newRecords={};
+      Object.entries(fsRecords||{}).forEach(([k,v])=>{
+        if(!localRecords[k]) newRecords[k]=v;
+      });
 
-      const next={...local,users:merged,records:mergedRecords};
-      localStorage.setItem(SK,JSON.stringify(next));
+      // 변경사항이 있을 때만 업데이트
+      const hasNewUsers=newUsers.length>0;
+      const hasNewRecords=Object.keys(newRecords).length>0;
 
-      // React가 마운트될 때까지 기다린 후 이벤트 발송
-      const dispatch=()=>window.dispatchEvent(new CustomEvent("fbSynced",{detail:next}));
-      if(document.getElementById("root")&&document.getElementById("root").children.length>0){
-        dispatch();
+      if(hasNewUsers||hasNewRecords){
+        const mergedUsers=[...localUsers,...newUsers];
+        const mergedRecords={...localRecords,...newRecords};
+        const next={...local,users:mergedUsers,records:mergedRecords};
+        localStorage.setItem(SK,JSON.stringify(next)); // 신규 데이터만 추가했으므로 안전
+        window.dispatchEvent(new CustomEvent("fbSynced",{detail:next}));
       } else {
-        let tries=0;
-        const timer=setInterval(()=>{
-          tries++;
-          if(document.getElementById("root")?.children.length>0||tries>50){
-            clearInterval(timer);
-            dispatch();
-          }
-        },100);
+        // 변경 없어도 React state 초기화를 위해 로컬 데이터로 이벤트 발송
+        const dispatch=()=>window.dispatchEvent(new CustomEvent("fbSynced",{detail:local}));
+        if(document.getElementById("root")?.children.length>0){
+          dispatch();
+        } else {
+          let tries=0;
+          const timer=setInterval(()=>{
+            tries++;
+            if(document.getElementById("root")?.children.length>0||tries>50){
+              clearInterval(timer);dispatch();
+            }
+          },100);
+        }
       }
       console.log("✅ Firebase 동기화 완료");
     }catch(e){console.error("fbInit",e);}
