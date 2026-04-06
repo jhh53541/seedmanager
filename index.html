@@ -3609,12 +3609,7 @@ function App(){
   });
   const[screen,setScreen]=useState(()=>{
     const stayId=localStorage.getItem("stay_login")||sessionStorage.getItem("stay_login");
-    if(stayId){
-      const saved=ld()||INIT;
-      const allUsers=[...(saved.users||[]),...INIT.users.filter(iu=>!(saved.users||[]).some(u=>u.id===iu.id))];
-      const u=allUsers.find(u=>u.id===stayId);
-      if(u) return "app";
-    }
+    if(stayId) return "app"; // stayId가 있으면 일단 앱 화면 표시 (유저 복원은 fbInit에서)
     return "login";
   });
   const[tab,setTab]=useState("home");
@@ -3636,14 +3631,13 @@ function App(){
         (synced.users||[]).forEach(fu=>{
           const idx=mergedUsers.findIndex(u=>u.id===fu.id);
           if(idx<0) mergedUsers.push({...fu,signature:loadSig(fu.id)||fu.signature||null});
-          // 기존 유저는 로컬 state 그대로 유지 (서명만 복원)
           else mergedUsers[idx]={...mergedUsers[idx],signature:loadSig(mergedUsers[idx].id)||mergedUsers[idx].signature||null};
         });
-        // currentUser는 현재 state 우선, 없으면 stay_login으로 복원
+        // INIT admin도 포함해서 currentUser 복원
+        const allUsers=[...mergedUsers,...INIT.users.filter(iu=>!mergedUsers.some(u=>u.id===iu.id))];
         const currentUser=p.currentUser
           ? {...p.currentUser,signature:loadSig(p.currentUser.id)||p.currentUser.signature||null}
-          : mergedUsers.find(u=>u.id===currentId)||null;
-        // records: 기존 state 우선, Firebase에만 있는 것 추가
+          : allUsers.find(u=>u.id===currentId)||null;
         const mergedRecords={...(synced.records||{}),...(p.records||{})};
         return{...p,users:mergedUsers,records:mergedRecords,currentUser};
       });
@@ -3746,7 +3740,6 @@ function App(){
     setScreen(s);
   };
 
-  useEffect(()=>{if(app.currentUser)sv(app);},[app]);
   useEffect(()=>{const id=setInterval(()=>setCanGoBack(navStack.current.length>0),200);return()=>clearInterval(id);},[]);
   const onLogin=()=>{
     pushNav({screen:"login",tab:"home",noticeOpen:false,disasterOpen:false});
@@ -3768,6 +3761,15 @@ function App(){
 
   if(screen==="login") return<LoginScreen app={app} setApp={setApp} onLogin={onLogin} onSignup={()=>changeScreen("signup")}/>;
   if(screen==="signup")return<SignupScreen app={app} setApp={setApp} onBack={()=>changeScreen("login")}/>;
+  // currentUser가 아직 복원 안 된 경우 로딩 표시 (Firebase 동기화 대기)
+  if(!app.currentUser) return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"white"}}>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:48,marginBottom:16}}>🌾</div>
+        <p style={{color:"#16a34a",fontWeight:700,fontSize:15}}>로딩 중...</p>
+      </div>
+    </div>
+  );
   const isAdmin=app.currentUser?.role==="admin"||app.currentUser?.role==="seed";
 
   // 뒤로가기 버튼 핸들러
