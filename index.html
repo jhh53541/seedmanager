@@ -145,55 +145,55 @@
   window.fbInit=async()=>{
     try{
       const SK="seedfarm_v8";
-      // 항상 최신 로컬 데이터 기준으로 시작
-      const local=JSON.parse(localStorage.getItem(SK)||"{}");
+      // localStorage 없으면 sessionStorage에서 복원 (안드로이드 대비)
+      const localRaw=localStorage.getItem(SK)||sessionStorage.getItem(SK)||"{}";
+      const local=JSON.parse(localRaw);
       const localUsers=local.users||[];
 
-      // Firestore에서 로컬에 없는 신규 유저만 가져오기
+      // Firestore에서 전체 유저 가져오기
       const fsUsers=await window.fbLoadUsers();
-      const newUsers=[];
+      const merged=[...localUsers];
       if(fsUsers&&fsUsers.length>0){
         fsUsers.forEach(fu=>{
-          if(fu.id==="admin") return; // admin은 항상 로컬 우선
-          const exists=localUsers.some(u=>u.id===fu.id);
-          if(!exists) newUsers.push(fu); // 로컬에 없는 신규 유저만 추가
+          if(fu.id==="admin") return; // admin은 로컬 우선
+          const idx=merged.findIndex(u=>u.id===fu.id);
+          if(idx>=0){
+            // 로컬 데이터 우선 (로컬이 더 최신), pw는 항상 로컬 유지
+            merged[idx]={...fu,...merged[idx],pw:merged[idx].pw};
+          } else {
+            // 로컬에 없는 신규 유저 추가
+            merged.push(fu);
+          }
         });
       }
 
       // records: 로컬에 없는 것만 추가
       const fsRecords=await window.fbGetAllRecords();
       const localRecords=local.records||{};
-      const newRecords={};
+      const mergedRecords={...localRecords};
       Object.entries(fsRecords||{}).forEach(([k,v])=>{
-        if(!localRecords[k]) newRecords[k]=v;
+        if(!localRecords[k]) mergedRecords[k]=v;
       });
 
-      // 변경사항이 있을 때만 업데이트
-      const hasNewUsers=newUsers.length>0;
-      const hasNewRecords=Object.keys(newRecords).length>0;
+      const next={...local,users:merged,records:mergedRecords};
+      const nextJson=JSON.stringify(next);
+      localStorage.setItem(SK,nextJson);
+      try{sessionStorage.setItem(SK,nextJson);}catch{}
 
-      if(hasNewUsers||hasNewRecords){
-        const mergedUsers=[...localUsers,...newUsers];
-        const mergedRecords={...localRecords,...newRecords};
-        const next={...local,users:mergedUsers,records:mergedRecords};
-        localStorage.setItem(SK,JSON.stringify(next)); // 신규 데이터만 추가했으므로 안전
-        window.dispatchEvent(new CustomEvent("fbSynced",{detail:next}));
+      // React 마운트 대기 후 이벤트 발송
+      const dispatch=()=>window.dispatchEvent(new CustomEvent("fbSynced",{detail:next}));
+      if(document.getElementById("root")?.children.length>0){
+        dispatch();
       } else {
-        // 변경 없어도 React state 초기화를 위해 로컬 데이터로 이벤트 발송
-        const dispatch=()=>window.dispatchEvent(new CustomEvent("fbSynced",{detail:local}));
-        if(document.getElementById("root")?.children.length>0){
-          dispatch();
-        } else {
-          let tries=0;
-          const timer=setInterval(()=>{
-            tries++;
-            if(document.getElementById("root")?.children.length>0||tries>50){
-              clearInterval(timer);dispatch();
-            }
-          },100);
-        }
+        let tries=0;
+        const timer=setInterval(()=>{
+          tries++;
+          if(document.getElementById("root")?.children.length>0||tries>50){
+            clearInterval(timer);dispatch();
+          }
+        },100);
       }
-      console.log("✅ Firebase 동기화 완료");
+      console.log("✅ Firebase 동기화 완료, 유저수:",merged.length);
     }catch(e){console.error("fbInit",e);}
   };
   window.fbInit();
@@ -285,7 +285,9 @@ const loadSig=(userId)=>{try{const d=JSON.parse(localStorage.getItem(SK_SIG)||"{
 // users에서 서명 제거 후 저장, 서명은 별도 저장
 const ld=()=>{
   try{
-    const r=localStorage.getItem(SK);
+    let r=localStorage.getItem(SK);
+    // localStorage 실패 시 sessionStorage에서 복원 (안드로이드 대비)
+    if(!r) r=sessionStorage.getItem(SK);
     const data=r?JSON.parse(r):null;
     if(!data) return null;
     // 서명 복원
@@ -309,7 +311,10 @@ const sv=d=>{
     });
     const cleanCurrentUser=d.currentUser?{...d.currentUser,signature:undefined}:d.currentUser;
     if(d.currentUser?.signature) saveSig(d.currentUser.id, d.currentUser.signature);
-    localStorage.setItem(SK,JSON.stringify({...d,users:cleanUsers,currentUser:cleanCurrentUser}));
+    const cleanJson=JSON.stringify({...d,users:cleanUsers,currentUser:cleanCurrentUser});
+    localStorage.setItem(SK,cleanJson);
+    // 안드로이드 대비 sessionStorage에도 백업
+    try{sessionStorage.setItem(SK,cleanJson);}catch{}
   }catch(e){console.error("localStorage 저장 실패",e);}
   // Firestore에 users 동기화 (비밀번호 제외, 서명은 Storage URL로)
   if(window.fbSaveUser&&d.users){
@@ -405,8 +410,13 @@ function LoginScreen({app,setApp,onLogin,onSignup}){
     if(u){
       if(remId) localStorage.setItem("saved_id",id);
       else localStorage.removeItem("saved_id");
-      if(stayLogin) localStorage.setItem("stay_login",id);
-      else localStorage.removeItem("stay_login");
+      if(stayLogin){
+        localStorage.setItem("stay_login",id);
+        sessionStorage.setItem("stay_login",id); // 안드로이드 백업
+      } else {
+        localStorage.removeItem("stay_login");
+        sessionStorage.removeItem("stay_login");
+      }
       setApp(p=>({...p,...freshApp,currentUser:u}));
       onLogin();
     } else setErr("아이디 또는 비밀번호가 올바르지 않습니다.");
@@ -3588,10 +3598,9 @@ function AdminScreen({app,setApp,adminSelRef}){
 function App(){
   const[app,setApp]=useState(()=>{
     const saved=ld()||INIT;
-    // 새로고침 시 stay_login으로 currentUser 복원
-    const stayId=localStorage.getItem("stay_login");
+    // stay_login을 localStorage와 sessionStorage 모두에서 확인
+    const stayId=localStorage.getItem("stay_login")||sessionStorage.getItem("stay_login");
     if(stayId&&!saved.currentUser){
-      // INIT admin 계정도 포함해서 찾기
       const allUsers=[...(saved.users||[]),...INIT.users.filter(iu=>!(saved.users||[]).some(u=>u.id===iu.id))];
       const u=allUsers.find(u=>u.id===stayId);
       if(u) return{...saved,currentUser:u};
@@ -3599,7 +3608,7 @@ function App(){
     return saved;
   });
   const[screen,setScreen]=useState(()=>{
-    const stayId=localStorage.getItem("stay_login");
+    const stayId=localStorage.getItem("stay_login")||sessionStorage.getItem("stay_login");
     if(stayId){
       const saved=ld()||INIT;
       const allUsers=[...(saved.users||[]),...INIT.users.filter(iu=>!(saved.users||[]).some(u=>u.id===iu.id))];
@@ -3619,18 +3628,20 @@ function App(){
       const synced=e.detail;
       if(!synced)return;
       setApp(p=>{
-        const stayId=localStorage.getItem("stay_login");
+        const stayId=localStorage.getItem("stay_login")||sessionStorage.getItem("stay_login");
         const currentId=p.currentUser?.id||stayId;
-        // 기존 React state users를 기준으로, Firestore에만 있는 신규 유저만 추가
+        // synced.users 기준으로 병합 (로컬 state 우선, Firebase는 신규 유저만 추가)
         const existingUsers=p.users||[];
-        const newFsUsers=(synced.users||[]).filter(fu=>!existingUsers.some(u=>u.id===fu.id));
-        const mergedUsers=[...existingUsers,...newFsUsers].map(u=>({
-          ...u,
-          signature:loadSig(u.id)||u.signature||null
-        }));
-        // currentUser는 현재 state 우선
+        const mergedUsers=[...existingUsers];
+        (synced.users||[]).forEach(fu=>{
+          const idx=mergedUsers.findIndex(u=>u.id===fu.id);
+          if(idx<0) mergedUsers.push({...fu,signature:loadSig(fu.id)||fu.signature||null});
+          // 기존 유저는 로컬 state 그대로 유지 (서명만 복원)
+          else mergedUsers[idx]={...mergedUsers[idx],signature:loadSig(mergedUsers[idx].id)||mergedUsers[idx].signature||null};
+        });
+        // currentUser는 현재 state 우선, 없으면 stay_login으로 복원
         const currentUser=p.currentUser
-          ? {...p.currentUser, signature:loadSig(p.currentUser.id)||p.currentUser.signature||null}
+          ? {...p.currentUser,signature:loadSig(p.currentUser.id)||p.currentUser.signature||null}
           : mergedUsers.find(u=>u.id===currentId)||null;
         // records: 기존 state 우선, Firebase에만 있는 것 추가
         const mergedRecords={...(synced.records||{}),...(p.records||{})};
@@ -3743,6 +3754,7 @@ function App(){
   };
   const onLogout=()=>{
     localStorage.removeItem("stay_login");
+    sessionStorage.removeItem("stay_login");
     // users 정보는 유지하고 currentUser만 null로 저장
     setApp(p=>{
       const n={...p,currentUser:null};
