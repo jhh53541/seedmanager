@@ -3764,9 +3764,16 @@ function App(){
   // currentUser가 아직 복원 안 된 경우 로딩 표시 (Firebase 동기화 대기)
   if(!app.currentUser) return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"white"}}>
-      <div style={{textAlign:"center"}}>
+      <div style={{textAlign:"center",padding:"0 24px"}}>
         <div style={{fontSize:48,marginBottom:16}}>🌾</div>
-        <p style={{color:"#16a34a",fontWeight:700,fontSize:15}}>로딩 중...</p>
+        <p style={{color:"#16a34a",fontWeight:700,fontSize:15,marginBottom:16}}>로딩 중...</p>
+        <div style={{background:"#f3f4f6",borderRadius:12,padding:16,textAlign:"left",fontSize:11,color:"#6b7280",wordBreak:"break-all"}}>
+          <p style={{margin:"0 0 4px"}}>stay_login(LS): {localStorage.getItem("stay_login")||"없음"}</p>
+          <p style={{margin:"0 0 4px"}}>stay_login(SS): {sessionStorage.getItem("stay_login")||"없음"}</p>
+          <p style={{margin:"0 0 4px"}}>seedfarm_v8(LS): {localStorage.getItem("seedfarm_v8")?"있음":"없음"}</p>
+          <p style={{margin:"0 0 4px"}}>seedfarm_v8(SS): {sessionStorage.getItem("seedfarm_v8")?"있음":"없음"}</p>
+          <p style={{margin:0}}>users수: {(app.users||[]).length}명</p>
+        </div>
       </div>
     </div>
   );
