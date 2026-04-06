@@ -278,6 +278,42 @@ const {useState,useRef,useEffect,useCallback}=React;
 const SK="seedfarm_v8";
 const SK_SIG="seedfarm_signatures"; // 서명 별도 저장
 
+// 쿠키 헬퍼 (stay_login용 - 안드로이드 localStorage 불안정 대비)
+const setCookie=(name,value,days=365)=>{
+  try{
+    const expires=new Date(Date.now()+days*864e5).toUTCString();
+    document.cookie=`${name}=${encodeURIComponent(value)};expires=${expires};path=/;SameSite=Lax`;
+  }catch{}
+};
+const getCookie=(name)=>{
+  try{
+    const m=document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
+    return m?decodeURIComponent(m[1]):null;
+  }catch{return null;}
+};
+const deleteCookie=(name)=>{
+  try{document.cookie=`${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;}catch{}
+};
+
+// stay_login 저장 (localStorage + sessionStorage + 쿠키 3중 저장)
+const saveStayLogin=(id)=>{
+  try{localStorage.setItem("stay_login",id);}catch{}
+  try{sessionStorage.setItem("stay_login",id);}catch{}
+  setCookie("stay_login",id);
+};
+// stay_login 읽기 (3곳 중 하나라도 있으면 반환)
+const getStayLogin=()=>{
+  return localStorage.getItem("stay_login")||
+         sessionStorage.getItem("stay_login")||
+         getCookie("stay_login")||null;
+};
+// stay_login 삭제 (3곳 모두)
+const removeStayLogin=()=>{
+  try{localStorage.removeItem("stay_login");}catch{}
+  try{sessionStorage.removeItem("stay_login");}catch{}
+  deleteCookie("stay_login");
+};
+
 // 서명을 별도 키에 저장/로드
 const saveSig=(userId,sig)=>{try{const d=JSON.parse(localStorage.getItem(SK_SIG)||"{}");d[userId]=sig;localStorage.setItem(SK_SIG,JSON.stringify(d));}catch(e){console.error("서명 저장 실패",e);}};
 const loadSig=(userId)=>{try{const d=JSON.parse(localStorage.getItem(SK_SIG)||"{}");return d[userId]||null;}catch{return null;}};
@@ -397,7 +433,7 @@ function LoginScreen({app,setApp,onLogin,onSignup}){
   const[pw,setPw]=useState("");
   const[err,setErr]=useState("");
   const[remId,setRemId]=useState(()=>!!localStorage.getItem("saved_id"));
-  const[stayLogin,setStayLogin]=useState(()=>!!localStorage.getItem("stay_login"));
+  const[stayLogin,setStayLogin]=useState(()=>!!getStayLogin());
 
   const doLogin=()=>{
     // localStorage → app.users → INIT 순서로 사용자 찾기
@@ -411,11 +447,9 @@ function LoginScreen({app,setApp,onLogin,onSignup}){
       if(remId) localStorage.setItem("saved_id",id);
       else localStorage.removeItem("saved_id");
       if(stayLogin){
-        localStorage.setItem("stay_login",id);
-        sessionStorage.setItem("stay_login",id); // 안드로이드 백업
+        saveStayLogin(id);
       } else {
-        localStorage.removeItem("stay_login");
-        sessionStorage.removeItem("stay_login");
+        removeStayLogin();
       }
       setApp(p=>({...p,...freshApp,currentUser:u}));
       onLogin();
@@ -3598,8 +3632,7 @@ function AdminScreen({app,setApp,adminSelRef}){
 function App(){
   const[app,setApp]=useState(()=>{
     const saved=ld()||INIT;
-    // stay_login을 localStorage와 sessionStorage 모두에서 확인
-    const stayId=localStorage.getItem("stay_login")||sessionStorage.getItem("stay_login");
+    const stayId=getStayLogin();
     if(stayId&&!saved.currentUser){
       const allUsers=[...(saved.users||[]),...INIT.users.filter(iu=>!(saved.users||[]).some(u=>u.id===iu.id))];
       const u=allUsers.find(u=>u.id===stayId);
@@ -3608,8 +3641,8 @@ function App(){
     return saved;
   });
   const[screen,setScreen]=useState(()=>{
-    const stayId=localStorage.getItem("stay_login")||sessionStorage.getItem("stay_login");
-    if(stayId) return "app"; // stayId가 있으면 일단 앱 화면 표시 (유저 복원은 fbInit에서)
+    const stayId=getStayLogin();
+    if(stayId) return "app";
     return "login";
   });
   const[tab,setTab]=useState("home");
@@ -3623,7 +3656,7 @@ function App(){
       const synced=e.detail;
       if(!synced)return;
       setApp(p=>{
-        const stayId=localStorage.getItem("stay_login")||sessionStorage.getItem("stay_login");
+        const stayId=getStayLogin();
         const currentId=p.currentUser?.id||stayId;
         // synced.users 기준으로 병합 (로컬 state 우선, Firebase는 신규 유저만 추가)
         const existingUsers=p.users||[];
@@ -3746,8 +3779,7 @@ function App(){
     setScreen("app");setTab("home");
   };
   const onLogout=()=>{
-    localStorage.removeItem("stay_login");
-    sessionStorage.removeItem("stay_login");
+    removeStayLogin();
     // users 정보는 유지하고 currentUser만 null로 저장
     setApp(p=>{
       const n={...p,currentUser:null};
@@ -3770,6 +3802,7 @@ function App(){
         <div style={{background:"#f3f4f6",borderRadius:12,padding:16,textAlign:"left",fontSize:11,color:"#6b7280",wordBreak:"break-all"}}>
           <p style={{margin:"0 0 4px"}}>stay_login(LS): {localStorage.getItem("stay_login")||"없음"}</p>
           <p style={{margin:"0 0 4px"}}>stay_login(SS): {sessionStorage.getItem("stay_login")||"없음"}</p>
+          <p style={{margin:"0 0 4px"}}>stay_login(쿠키): {getCookie("stay_login")||"없음"}</p>
           <p style={{margin:"0 0 4px"}}>seedfarm_v8(LS): {localStorage.getItem("seedfarm_v8")?"있음":"없음"}</p>
           <p style={{margin:"0 0 4px"}}>seedfarm_v8(SS): {sessionStorage.getItem("seedfarm_v8")?"있음":"없음"}</p>
           <p style={{margin:0}}>users수: {(app.users||[]).length}명</p>
