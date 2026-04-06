@@ -1037,18 +1037,22 @@ const cropRank=c=>{const i=CROP_ORDER.indexOf(c);return i===-1?99:i;};
 const CROP_GROUPS={"벼":["벼"],"콩":["콩"],"맥류":["보리","밀","트리티케일"]};
 
 function UserManageScreen({app,setApp,onBack}){
-  const members=app.users.filter(u=>u.role!=="admin").sort((a,b)=>cropRank(a.crop)-cropRank(b.crop));
+  const members=app.users.filter(u=>u.id!=="admin").sort((a,b)=>cropRank(a.crop)-cropRank(b.crop));
   const[saved,setSaved]=useState(false);
+  // 로컬 role 변경 상태 (저장 전까지 임시 보관)
+  const[roleChanges,setRoleChanges]=useState({});
 
   const changeRole=(userId,newRole)=>{
-    const users=app.users.map(u=>u.id===userId?{...u,role:newRole}:u);
-    const next={...app,users};
-    setApp(next);
-    try{localStorage.setItem("seedfarm_v8",JSON.stringify(next));}catch{}
+    setRoleChanges(p=>({...p,[userId]:newRole}));
   };
 
   const doSave=()=>{
-    try{localStorage.setItem("seedfarm_v8",JSON.stringify(app));}catch{}
+    const users=app.users.map(u=>roleChanges[u.id]?{...u,role:roleChanges[u.id]}:u);
+    const next={...app,users};
+    setApp(next);
+    sv(next);
+    if(window.fbSaveUser) users.forEach(u=>{if(u.id!=="admin")window.fbSaveUser(u);});
+    setRoleChanges({});
     setSaved(true);setTimeout(()=>setSaved(false),2000);
   };
 
@@ -1072,8 +1076,8 @@ function UserManageScreen({app,setApp,onBack}){
                 <div key={u.id} style={{display:"grid",gridTemplateColumns:"1.1fr 1fr 1.1fr 0.9fr 0.9fr",textAlign:"center",fontSize:12,borderBottom:"1px solid #f3f4f6",background:i%2===0?"white":"#f9fafb",alignItems:"center"}}>
                   <div style={{padding:"10px 4px",borderRight:"1px solid #f3f4f6",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.danjiName}</div>
                   <div style={{padding:"6px 4px",borderRight:"1px solid #f3f4f6"}}>
-                    <select value={u.role||"user"} onChange={e=>changeRole(u.id,e.target.value)}
-                      style={{width:"100%",border:"1.5px solid #d1d5db",borderRadius:8,padding:"5px 2px",fontSize:11,fontFamily:"inherit",outline:"none",background:"white",cursor:"pointer",textAlign:"center"}}>
+                    <select value={roleChanges[u.id]||u.role||"user"} onChange={e=>changeRole(u.id,e.target.value)}
+                      style={{width:"100%",border:`1.5px solid ${roleChanges[u.id]?"#f97316":"#d1d5db"}`,borderRadius:8,padding:"5px 2px",fontSize:11,fontFamily:"inherit",outline:"none",background:roleChanges[u.id]?"#fff7ed":"white",cursor:"pointer",textAlign:"center"}}>
                       <option value="user">일반회원</option>
                       <option value="dual">2품종생산</option>
                       <option value="seed">종자원</option>
