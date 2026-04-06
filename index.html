@@ -145,7 +145,6 @@
   window.fbInit=async()=>{
     try{
       const SK="seedfarm_v8";
-      // localStorage 없으면 sessionStorage에서 복원 (안드로이드 대비)
       const localRaw=localStorage.getItem(SK)||sessionStorage.getItem(SK)||"{}";
       const local=JSON.parse(localRaw);
       const localUsers=local.users||[];
@@ -155,19 +154,17 @@
       const merged=[...localUsers];
       if(fsUsers&&fsUsers.length>0){
         fsUsers.forEach(fu=>{
-          if(fu.id==="admin") return; // admin은 로컬 우선
+          if(fu.id==="admin") return;
           const idx=merged.findIndex(u=>u.id===fu.id);
           if(idx>=0){
-            // 로컬 데이터 우선 (로컬이 더 최신), pw는 항상 로컬 유지
             merged[idx]={...fu,...merged[idx],pw:merged[idx].pw};
           } else {
-            // 로컬에 없는 신규 유저 추가
             merged.push(fu);
           }
         });
       }
 
-      // records: 로컬에 없는 것만 추가
+      // records 동기화
       const fsRecords=await window.fbGetAllRecords();
       const localRecords=local.records||{};
       const mergedRecords={...localRecords};
@@ -175,7 +172,17 @@
         if(!localRecords[k]) mergedRecords[k]=v;
       });
 
-      const next={...local,users:merged,records:mergedRecords};
+      // stay_login 유저 복원 (모든 저장소에서 확인)
+      const stayId=localStorage.getItem("stay_login")||
+                   sessionStorage.getItem("stay_login")||
+                   getCookie("stay_login")||null;
+      let currentUser=local.currentUser||null;
+      if(stayId&&!currentUser){
+        const allUsers=[...merged,{id:"admin",pw:"12345",role:"admin",region:"",danjiName:"본부",chairName:"관리자",crop:"-",variety:"-",farmCount:0,area:0,production:0,signature:null}];
+        currentUser=allUsers.find(u=>u.id===stayId)||null;
+      }
+
+      const next={...local,users:merged,records:mergedRecords,currentUser};
       const nextJson=JSON.stringify(next);
       localStorage.setItem(SK,nextJson);
       try{sessionStorage.setItem(SK,nextJson);}catch{}
@@ -193,7 +200,7 @@
           }
         },100);
       }
-      console.log("✅ Firebase 동기화 완료, 유저수:",merged.length);
+      console.log("✅ Firebase 동기화 완료, 유저수:",merged.length,"currentUser:",currentUser?.id);
     }catch(e){console.error("fbInit",e);}
   };
   window.fbInit();
@@ -279,10 +286,13 @@ const SK="seedfarm_v8";
 const SK_SIG="seedfarm_signatures"; // 서명 별도 저장
 
 // 쿠키 헬퍼 (stay_login용 - 안드로이드 localStorage 불안정 대비)
+const _cookiePath=location.pathname.replace(/\/[^/]*$/,'')||'/';
 const setCookie=(name,value,days=365)=>{
   try{
     const expires=new Date(Date.now()+days*864e5).toUTCString();
+    // GitHub Pages 경로 대응: path를 루트와 현재 경로 둘 다 저장
     document.cookie=`${name}=${encodeURIComponent(value)};expires=${expires};path=/;SameSite=Lax`;
+    document.cookie=`${name}=${encodeURIComponent(value)};expires=${expires};path=${_cookiePath};SameSite=Lax`;
   }catch{}
 };
 const getCookie=(name)=>{
@@ -292,7 +302,10 @@ const getCookie=(name)=>{
   }catch{return null;}
 };
 const deleteCookie=(name)=>{
-  try{document.cookie=`${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;}catch{}
+  try{
+    document.cookie=`${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+    document.cookie=`${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=${_cookiePath}`;
+  }catch{}
 };
 
 // stay_login 저장 (localStorage + sessionStorage + 쿠키 3중 저장)
@@ -3658,7 +3671,6 @@ function App(){
       setApp(p=>{
         const stayId=getStayLogin();
         const currentId=p.currentUser?.id||stayId;
-        // synced.users 기준으로 병합 (로컬 state 우선, Firebase는 신규 유저만 추가)
         const existingUsers=p.users||[];
         const mergedUsers=[...existingUsers];
         (synced.users||[]).forEach(fu=>{
@@ -3666,14 +3678,17 @@ function App(){
           if(idx<0) mergedUsers.push({...fu,signature:loadSig(fu.id)||fu.signature||null});
           else mergedUsers[idx]={...mergedUsers[idx],signature:loadSig(mergedUsers[idx].id)||mergedUsers[idx].signature||null};
         });
-        // INIT admin도 포함해서 currentUser 복원
         const allUsers=[...mergedUsers,...INIT.users.filter(iu=>!mergedUsers.some(u=>u.id===iu.id))];
         const currentUser=p.currentUser
-          ? {...p.currentUser,signature:loadSig(p.currentUser.id)||p.currentUser.signature||null}
-          : allUsers.find(u=>u.id===currentId)||null;
+          ?{...p.currentUser,signature:loadSig(p.currentUser.id)||p.currentUser.signature||null}
+          :(synced.currentUser||allUsers.find(u=>u.id===currentId)||null);
         const mergedRecords={...(synced.records||{}),...(p.records||{})};
         return{...p,users:mergedUsers,records:mergedRecords,currentUser};
       });
+      // currentUser가 복원되면 screen을 app으로 설정
+      if(synced.currentUser||getStayLogin()){
+        setScreen("app");
+      }
     };
     window.addEventListener("fbSynced",handler);
     return()=>window.removeEventListener("fbSynced",handler);
